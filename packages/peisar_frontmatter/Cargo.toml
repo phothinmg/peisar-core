@@ -1,0 +1,16 @@
+[package]
+name = "peisar_frontmatter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+
+[dependencies]
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+
+[lib]
+name = "peisar_frontmatter"
+path = "src/lib.rs"

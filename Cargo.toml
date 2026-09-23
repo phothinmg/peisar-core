@@ -1,0 +1,20 @@
+[workspace]
+resolver = "3"
+members = [
+    "packages/peisar_frontmatter",
+    "packages/peisar_fs",
+    "packages/peisar_log",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+authors = ["Pho Thin Maung <phothinmg@disroot.org>"]
+repository = "https://github.com/suseejs/peisar-mono-repo"
+
+[workspace.dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_yaml = "0.9"
+colored = "2"
+peisar_log = { path = "./packages/peisar_log" }
