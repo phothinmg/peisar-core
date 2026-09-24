@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+    "packages/peisar_ast",
     "packages/peisar_frontmatter",
     "packages/peisar_fs",
     "packages/peisar_log",
@@ -18,3 +19,5 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_yaml = "0.9"
 colored = "2"
 peisar_log = { path = "./packages/peisar_log" }
+serde_json = "1.0"
+syntect = "5.3"
