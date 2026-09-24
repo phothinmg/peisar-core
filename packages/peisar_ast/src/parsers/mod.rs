@@ -2,6 +2,7 @@ mod atters;
 mod block;
 mod inline;
 mod table;
+pub mod visitor;
 
 use crate::options::AstOptions;
 use crate::tokens::{span::Span, token::Block};

@@ -22,6 +22,13 @@ impl<T> ParseResult<T> {
     pub fn pure_markdown_content(&self) -> &str {
         &self.pure_markdown_content
     }
+
+    /// Consume the ParseResult and return the owned Markdown content and owned
+    /// optional YAML front matter in one allocation. This is useful for callers
+    /// that need to take ownership of the parsed frontmatter value.
+    pub fn into_parts(self) -> (String, Option<T>) {
+        (self.pure_markdown_content, self.yaml_data)
+    }
 }
 
 /// Parses a Markdown document with optional YAML front matter.

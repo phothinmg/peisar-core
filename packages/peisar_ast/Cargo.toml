@@ -6,11 +6,15 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 readme = "README.md"
+# Exclude the internal test binary and its generated JSON output from the
+# published crate. `src/main.rs` is a local test harness, not a shipped binary.
+exclude = ["src/main.rs"]
 
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 syntect = { workspace = true }
+peisar_frontmatter = { workspace = true }
 
 [lib]
 name = "peisar_ast"

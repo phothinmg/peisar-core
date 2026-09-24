@@ -193,6 +193,7 @@ dependencies = [
 name = "peisar_ast"
 version = "0.1.0"
 dependencies = [
+ "peisar_frontmatter",
  "serde",
  "serde_json",
  "syntect",
@@ -218,6 +219,13 @@ name = "peisar_log"
 version = "0.1.0"
 dependencies = [
  "colored",
+]
+
+[[package]]
+name = "peisar_visitor"
+version = "0.1.0"
+dependencies = [
+ "peisar_ast",
 ]
 
 [[package]]
