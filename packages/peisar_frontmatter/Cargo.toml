@@ -10,6 +10,14 @@ readme = "README.md"
 [dependencies]
 serde = { workspace = true }
 serde_yaml = { workspace = true }
+serde_json = { workspace = true }
+napi-derive = { workspace = true }
+napi = { workspace = true, optional = true }
+
+[features]
+default = []
+# Enable napi-rs derive macros (for Node.js builds).
+napi = ["dep:napi"]
 
 [lib]
 name = "peisar_frontmatter"

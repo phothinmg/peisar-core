@@ -13,7 +13,7 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Pho Thin Maung <phothinmg@disroot.org>"]
-repository = "https://github.com/suseejs/peisar-mono-repo"
+repository = "https://github.com/phothinmg/peisar-core"
 
 [workspace.dependencies]
 serde = { version = "1.0.229", features = ["derive"] }

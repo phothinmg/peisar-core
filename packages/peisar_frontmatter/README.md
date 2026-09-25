@@ -59,6 +59,17 @@ Behavior notes
 - If no front matter is found, the original document is returned as the Markdown body and `yaml_data()` is `None`.
 - YAML parsing errors return an Err(String) with a message starting with `Failed to parse YAML front matter:`.
 
+napi-rs compatibility
+
+When built with the `napi` feature, this crate exports a non-generic JavaScript-facing API:
+
+- `parse_markdown_frontmatter_js(content: String) -> Result<ParseResultJs, napi::Error>`
+  - Deserialises the YAML front matter into a `serde_json::Value` (plain JS object).
+  - `ParseResultJs.yaml_data` is a JSON string (or `None`) — use `JSON.parse()` on the JS side.
+- `ParseResultJs` — napi object with `pure_markdown_content: String` and `yaml_data: Option<String>`.
+
+The core generic Rust API (`parse_markdown_frontmatter<T>`) is unaffected by the `napi` feature.
+
 Examples
 
 Parsing a file on disk:

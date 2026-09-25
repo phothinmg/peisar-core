@@ -5,9 +5,17 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+readme = "README.md"
 
 [dependencies]
 colored = { workspace = true }
+napi-derive = { workspace = true }
+napi = { workspace = true, optional = true }
+
+[features]
+default = []
+# Enable napi-rs derive macros (for Node.js builds).
+napi = ["dep:napi"]
 
 [lib]
 name = "peisar_log"

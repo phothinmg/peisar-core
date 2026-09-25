@@ -1,5 +1,7 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "napi")]
+use napi_derive::napi;
 
 /// Parsed Markdown content that may include YAML front matter.
 ///
@@ -77,6 +79,46 @@ where
     Ok(ParseResult {
         yaml_data,
         pure_markdown_content,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// napi-rs wrappers (JavaScript interop)
+// ---------------------------------------------------------------------------
+
+/// Non-generic result struct for napi-rs.
+///
+/// The core [`ParseResult<T>`] is generic over `T: DeserializeOwned`, which
+/// napi-rs does not support.  This mirror struct deserialises the YAML
+/// front-matter into a `serde_json::Value` (i.e. a plain JS object) instead.
+#[cfg(feature = "napi")]
+#[cfg_attr(feature = "napi", napi(object))]
+pub struct ParseResultJs {
+    /// The Markdown body with the YAML front matter removed.
+    pub pure_markdown_content: String,
+    /// The deserialised YAML front-matter as a JSON string (or `None`).
+    ///
+    /// A JSON string is used because napi-rs cannot directly return
+    /// `serde_json::Value`; the JS side can `JSON.parse()` it.
+    pub yaml_data: Option<String>,
+}
+
+/// napi-exported wrapper of [`parse_markdown_frontmatter`].
+///
+/// Deserialises the YAML front-matter into a `serde_json::Value` and
+/// returns the result as a [`ParseResultJs`] where `yaml_data` is a
+/// JSON string (or `None` if no front-matter was present).
+#[cfg(feature = "napi")]
+#[cfg_attr(feature = "napi", napi)]
+pub fn parse_markdown_frontmatter_js(content: String) -> Result<ParseResultJs, napi::Error> {
+    let result = parse_markdown_frontmatter::<serde_json::Value>(&content)
+        .map_err(|e| napi::Error::from_reason(e))?;
+    let yaml_data = result
+        .yaml_data
+        .map(|v| serde_json::to_string(&v).unwrap_or_default());
+    Ok(ParseResultJs {
+        pure_markdown_content: result.pure_markdown_content,
+        yaml_data,
     })
 }
 

@@ -9,6 +9,13 @@ readme = "README.md"
 
 [dependencies]
 peisar_log = { workspace = true }
+napi-derive = { workspace = true }
+napi = { workspace = true, optional = true }
+
+[features]
+default = []
+# Enable napi-rs derive macros (for Node.js builds).
+napi = ["dep:napi", "peisar_log/napi"]
 
 [lib]
 name = "peisar_fs"

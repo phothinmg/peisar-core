@@ -20,16 +20,15 @@ configured root directory.
 ## Quick example
 
 ```rust
-use std::path::PathBuf;
 use peisar_fs::PeisarFs;
 
 fn main() {
-    let filesystem = PeisarFs::new(Some(PathBuf::from("workspace")));
+    let filesystem = PeisarFs::new(Some("workspace".into()));
 
-    filesystem.write_file("notes/today.txt", "Remember to ship it.");
-    println!("{}", filesystem.read_file("notes/today.txt"));
+    filesystem.write_file("notes/today.txt".into(), "Remember to ship it.".into());
+    println!("{}", filesystem.read_file("notes/today.txt".into()));
 
-    let text_files = filesystem.read_dir(".", Some("txt"));
+    let text_files = filesystem.read_dir(".".into(), Some("txt".into()));
     println!("text files: {text_files:?}");
 }
 ```
@@ -40,7 +39,7 @@ Pass `None` to `PeisarFs::new` to use the process's current working directory:
 use peisar_fs::PeisarFs;
 
 let filesystem = PeisarFs::new(None);
-filesystem.mkdir("build/output");
+filesystem.mkdir("build/output".into());
 ```
 
 ## API
@@ -50,16 +49,15 @@ filesystem.mkdir("build/output");
 Creates a filesystem helper rooted at `root`. If `root` is `None`, the
 process's current directory is used.
 
-### `exixts(path)`
+### `exists(path)`
 
-Returns `true` when `path` exists below the configured root. The method name is
-`exixts` for compatibility with the current public API.
+Returns `true` when `path` exists below the configured root.
 
 ```rust
 use peisar_fs::PeisarFs;
 
 let filesystem = PeisarFs::new(None);
-if filesystem.exixts("Cargo.toml") {
+if filesystem.exists("Cargo.toml".into()) {
     println!("Cargo.toml exists");
 }
 ```
@@ -80,7 +78,7 @@ through `peisar_log` and terminate the process with an error status.
 
 ### `read_dir(path, extension)`
 
-Recursively returns files below `path` as `Vec<PathBuf>`.
+Recursively returns files below `path` as `Vec<String>`.
 
 - `Some("rs")` returns only files whose extension is exactly `rs`.
 - `None` returns all files.

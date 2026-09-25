@@ -1,5 +1,7 @@
 //! Filesystem helpers rooted at a configurable working directory.
 
+#[cfg(feature = "napi")]
+use napi_derive::napi;
 use peisar_log::{error, info};
 use std::{
     env, fs, io,
@@ -7,31 +9,34 @@ use std::{
 };
 
 /// Provides filesystem operations relative to a configured root directory.
+#[cfg_attr(feature = "napi", napi)]
 pub struct PeisarFs {
     cwd: PathBuf,
 }
 
+#[cfg_attr(feature = "napi", napi)]
 impl PeisarFs {
     /// Creates a filesystem helper rooted at `root`.
     ///
     /// When `root` is `None`, the process's current directory is used. If the
     /// current directory cannot be read, the helper falls back to `"."`.
-    pub fn new(root: Option<PathBuf>) -> Self {
+    #[cfg_attr(feature = "napi", napi(constructor))]
+    pub fn new(root: Option<String>) -> Self {
         Self {
-            cwd: if root.is_none() {
-                env::current_dir().unwrap_or(PathBuf::from("."))
-            } else {
-                root.unwrap_or(PathBuf::from("."))
+            cwd: match root {
+                Some(r) => PathBuf::from(r),
+                None => env::current_dir().unwrap_or(PathBuf::from(".")),
             },
         }
     }
 
     /// Returns whether `target_path` exists below the configured root.
-    pub fn exixts<P: AsRef<Path>>(&self, target_path: P) -> bool {
-        let final_target_path = self.cwd.join(target_path.as_ref());
-        let r = fs::exists(final_target_path);
+    #[cfg_attr(feature = "napi", napi)]
+    pub fn exists(&self, target_path: String) -> bool {
+        let final_target_path = self.cwd.join(&target_path);
+        let r = fs::exists(&final_target_path);
         if r.is_err() {
-            let message = format!("Error when checking target {:?}", target_path.as_ref());
+            let message = format!("Error when checking target {:?}", target_path);
             error(&message, true);
         }
         r.unwrap()
@@ -40,12 +45,13 @@ impl PeisarFs {
     /// Creates `dir_path` and all missing parent directories.
     ///
     /// If the directory already exists, no filesystem operation is performed.
-    pub fn mkdir<P: AsRef<Path>>(&self, dir_path: P) {
-        let final_dir_path = self.cwd.join(dir_path.as_ref());
-        if self.exixts(dir_path.as_ref()) {
+    #[cfg_attr(feature = "napi", napi)]
+    pub fn mkdir(&self, dir_path: String) {
+        let final_dir_path = self.cwd.join(&dir_path);
+        if self.exists(dir_path.clone()) {
             let message = format!(
                 "Directory {:?} already exists, nothing to create.",
-                dir_path.as_ref()
+                dir_path
             );
             info(&message);
         } else {
@@ -54,11 +60,12 @@ impl PeisarFs {
     }
 
     /// Writes `content` to `file_path`, creating missing parent directories.
-    pub fn write_file<P: AsRef<Path>, C: AsRef<[u8]>>(&self, file_path: P, content: C) {
-        let final_file_path = self.cwd.join(file_path);
+    #[cfg_attr(feature = "napi", napi)]
+    pub fn write_file(&self, file_path: String, content: String) {
+        let final_file_path = self.cwd.join(&file_path);
         if let Some(parent) = final_file_path.parent() {
             if !fs::exists(parent).unwrap() {
-                self.mkdir(parent);
+                fs::create_dir_all(parent).ok();
             }
         }
         fs::write(final_file_path, content).ok();
@@ -68,15 +75,16 @@ impl PeisarFs {
     ///
     /// This method reports a missing or unreadable file through `peisar_log`
     /// and exits the process when an error occurs.
-    pub fn read_file<P: AsRef<Path>>(&self, file_path: P) -> String {
-        let final_file_path = self.cwd.join(file_path.as_ref());
+    #[cfg_attr(feature = "napi", napi)]
+    pub fn read_file(&self, file_path: String) -> String {
+        let final_file_path = self.cwd.join(&file_path);
         if !fs::exists(final_file_path.clone()).unwrap() {
-            let message = format!("File {:?} dose not exists.", file_path.as_ref());
+            let message = format!("File {:?} dose not exists.", file_path);
             error(&message, true);
         }
         let contents = fs::read_to_string(final_file_path);
         if contents.is_err() {
-            let message = format!("Error when reading file {:?}", file_path.as_ref());
+            let message = format!("Error when reading file {:?}", file_path);
             error(&message, true);
         }
         contents.unwrap()
@@ -87,18 +95,19 @@ impl PeisarFs {
     /// When `ext` is `Some`, only files with that exact extension are
     /// returned. When it is `None`, all files are returned. Returned paths are
     /// rooted at the configured directory.
-    pub fn read_dir<P: AsRef<Path>>(&self, dir_path: P, ext: Option<&str>) -> Vec<PathBuf> {
+    #[cfg_attr(feature = "napi", napi)]
+    pub fn read_dir(&self, dir_path: String, ext: Option<String>) -> Vec<String> {
         let mut entries: Vec<PathBuf> = Vec::new();
-        let final_dir_path = self.cwd.join(dir_path.as_ref());
-        if let Err(err) = find_files_by_extension(&final_dir_path, &mut entries, ext) {
-            let message = format!(
-                "Error when reading directory {:?}: {}",
-                dir_path.as_ref(),
-                err
-            );
+        let final_dir_path = self.cwd.join(&dir_path);
+        let ext_ref = ext.as_deref();
+        if let Err(err) = find_files_by_extension(&final_dir_path, &mut entries, ext_ref) {
+            let message = format!("Error when reading directory {:?}: {}", dir_path, err);
             error(&message, true);
         }
         entries
+            .into_iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect()
     }
 }
 
@@ -153,14 +162,14 @@ mod tests {
     #[test]
     fn creates_directories_and_reads_and_writes_files() {
         let root = temporary_root();
-        let filesystem = PeisarFs::new(Some(root.clone()));
+        let filesystem = PeisarFs::new(Some(root.to_string_lossy().into_owned()));
 
-        filesystem.mkdir("nested/dir");
-        assert!(filesystem.exixts("nested/dir"));
+        filesystem.mkdir("nested/dir".into());
+        assert!(filesystem.exists("nested/dir".into()));
 
-        filesystem.write_file("nested/dir/file.txt", "hello");
-        assert!(filesystem.exixts("nested/dir/file.txt"));
-        assert_eq!(filesystem.read_file("nested/dir/file.txt"), "hello");
+        filesystem.write_file("nested/dir/file.txt".into(), "hello".into());
+        assert!(filesystem.exists("nested/dir/file.txt".into()));
+        assert_eq!(filesystem.read_file("nested/dir/file.txt".into()), "hello");
 
         fs::remove_dir_all(root).unwrap();
     }
@@ -168,17 +177,25 @@ mod tests {
     #[test]
     fn recursively_lists_all_files_or_only_matching_extensions() {
         let root = temporary_root();
-        let filesystem = PeisarFs::new(Some(root.clone()));
+        let filesystem = PeisarFs::new(Some(root.to_string_lossy().into_owned()));
 
-        filesystem.write_file("one.txt", "one");
-        filesystem.write_file("nested/two.rs", "two");
-        filesystem.write_file("nested/three.txt", "three");
+        filesystem.write_file("one.txt".into(), "one".into());
+        filesystem.write_file("nested/two.rs".into(), "two".into());
+        filesystem.write_file("nested/three.txt".into(), "three".into());
 
-        let mut all_files = filesystem.read_dir(".", None);
+        let mut all_files: Vec<PathBuf> = filesystem
+            .read_dir(".".into(), None)
+            .into_iter()
+            .map(PathBuf::from)
+            .collect();
         all_files.sort();
         assert_eq!(all_files.len(), 3);
 
-        let mut text_files = filesystem.read_dir(".", Some("txt"));
+        let mut text_files: Vec<PathBuf> = filesystem
+            .read_dir(".".into(), Some("txt".into()))
+            .into_iter()
+            .map(PathBuf::from)
+            .collect();
         text_files.sort();
         assert_eq!(
             text_files,
@@ -191,9 +208,9 @@ mod tests {
     #[test]
     fn returns_an_empty_list_for_a_missing_directory() {
         let root = temporary_root();
-        let filesystem = PeisarFs::new(Some(root.clone()));
+        let filesystem = PeisarFs::new(Some(root.to_string_lossy().into_owned()));
 
-        assert!(filesystem.read_dir("missing", None).is_empty());
+        assert!(filesystem.read_dir("missing".into(), None).is_empty());
 
         fs::remove_dir_all(root).unwrap_or(());
     }

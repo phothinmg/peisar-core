@@ -262,7 +262,10 @@ dependencies = [
 name = "peisar_frontmatter"
 version = "0.1.0"
 dependencies = [
+ "napi",
+ "napi-derive",
  "serde",
+ "serde_json",
  "serde_yaml",
 ]
 
@@ -270,6 +273,8 @@ dependencies = [
 name = "peisar_fs"
 version = "0.1.0"
 dependencies = [
+ "napi",
+ "napi-derive",
  "peisar_log",
 ]
 
@@ -288,6 +293,8 @@ name = "peisar_log"
 version = "0.1.0"
 dependencies = [
  "colored",
+ "napi",
+ "napi-derive",
 ]
 
 [[package]]
