@@ -20,9 +20,9 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_yaml = "0.9"
 colored = "2"
 serde_json = "1.0"
-peisar_log = { path = "./packages/peisar_log" }
-peisar_frontmatter = { path = "./packages/peisar_frontmatter" }
-peisar_ast = { path = "./packages/peisar_ast" }
+peisar_log = { version = "0.1.0", path = "./packages/peisar_log" }
+peisar_frontmatter = { version = "0.1.0", path = "./packages/peisar_frontmatter" }
+peisar_ast = { version = "0.1.0", path = "./packages/peisar_ast" }
 napi-derive = "3"
 # napi-rs support — enabled when building for Node.js via the `peisar` main crate.
 # Not used directly in this crate; the cfg_attr annotations are inert without
