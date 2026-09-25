@@ -24,6 +24,8 @@ use crate::options::AstOptions;
 use crate::tokens::{span::Span, token::Block};
 use inline::LinkRefMap;
 use serde::Serialize;
+#[cfg(feature = "napi")]
+use napi_derive::napi;
 
 // ---------------------------------------------------------------------------
 // Document
@@ -44,12 +46,12 @@ use serde::Serialize;
 /// assert_eq!(doc.node_type, "root");
 /// assert_eq!(doc.children.len(), 1);
 /// ```
-#[cfg_attr(feature = "napi", napi::napi(object))]
+#[cfg_attr(feature = "napi", napi(object))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Document {
     /// Always `"root"`.
     #[serde(rename = "type")]
-    pub node_type: &'static str,
+    pub node_type: String,
     /// Optional source file name.
     pub file_name: Option<String>,
     /// Span of the whole document in the source text.
@@ -64,7 +66,7 @@ pub struct Document {
 impl Default for Document {
     fn default() -> Self {
         Self {
-            node_type: "root",
+            node_type: "root".to_string(),
             file_name: None,
             pos: Span::default(),
             children: Vec::new(),
@@ -156,7 +158,7 @@ pub fn md_to_ast(input: &str, opts: &AstOptions, file_name: Option<String>) -> D
     let end = p.position_at(p.pos.min(p.lines.len()));
 
     Document {
-        node_type: "root",
+        node_type: "root".to_string(),
         pos: Span::new(start, end),
         file_name,
         children: blocks,

@@ -83,11 +83,11 @@ fn parse_attr_tokens(inner: &str) -> Attributes {
                     i += 1;
                 }
                 if i > start {
-                    attrs
-                        .classes
-                        .clone()
-                        .unwrap()
-                        .push(chars[start..i].iter().collect());
+                    let class: String = chars[start..i].iter().collect();
+                    match &mut attrs.classes {
+                        Some(v) => v.push(class),
+                        None => attrs.classes = Some(vec![class]),
+                    }
                 }
             }
             // key="value" or key='value'
@@ -119,7 +119,7 @@ fn parse_attr_tokens(inner: &str) -> Attributes {
                         if i < chars.len() {
                             i += 1; // skip closing quote
                         }
-                        attrs.attributes.clone().unwrap().push((key, val));
+                        push_attr(&mut attrs, key, val);
                     } else {
                         // unquoted value
                         let val_start = i;
@@ -128,12 +128,12 @@ fn parse_attr_tokens(inner: &str) -> Attributes {
                         }
                         let val: String = chars[val_start..i].iter().collect();
                         if !val.is_empty() {
-                            attrs.attributes.clone().unwrap().push((key, val));
+                            push_attr(&mut attrs, key, val);
                         }
                     }
                 } else {
                     // bare key → boolean attribute
-                    attrs.attributes.clone().unwrap().push((key, String::new()));
+                    push_attr(&mut attrs, key, String::new());
                 }
             }
             _ => {
@@ -143,6 +143,15 @@ fn parse_attr_tokens(inner: &str) -> Attributes {
     }
 
     attrs
+}
+
+/// Push a key-value pair into `attrs.attributes`, initialising the `Vec` if
+/// it is still `None`.
+fn push_attr(attrs: &mut Attributes, key: String, val: String) {
+    match &mut attrs.attributes {
+        Some(v) => v.push((key, val)),
+        None => attrs.attributes = Some(vec![(key, val)]),
+    }
 }
 
 fn is_ident_start(c: char) -> bool {

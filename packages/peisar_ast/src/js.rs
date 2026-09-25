@@ -39,6 +39,8 @@
 use crate::parsers::visitor::{AstVisitor, InlineVisitControl, VisitControl, visit_document_mut};
 use crate::tokens::token::{Block, Inline};
 use crate::{AstOptions, Document};
+#[cfg(feature = "napi")]
+use napi_derive::napi;
 
 // ---------------------------------------------------------------------------
 // napi-exported control mirrors
@@ -48,7 +50,7 @@ use crate::{AstOptions, Document};
 ///
 /// Returned from the JS `visitBlock` callback.  All fields are optional;
 /// omitting a field means "no change" for that operation.
-#[cfg_attr(feature = "napi", napi::napi(object))]
+#[cfg_attr(feature = "napi", napi(object))]
 #[derive(Debug, Default, Clone)]
 pub struct VisitControlJs {
     /// Nodes to insert before the current node.
@@ -79,7 +81,7 @@ impl From<VisitControlJs> for VisitControl {
 ///
 /// Returned from the JS `visitInline` callback.  All fields are optional;
 /// omitting a field means "no change" for that operation.
-#[cfg_attr(feature = "napi", napi::napi(object))]
+#[cfg_attr(feature = "napi", napi(object))]
 #[derive(Debug, Default, Clone)]
 pub struct InlineVisitControlJs {
     /// Nodes to insert before the current node.
@@ -153,10 +155,16 @@ impl AstVisitor for JsVisitor {
                 // Hand a clone of the current block to JS; JS may return a
                 // control struct with replacements.
                 let snapshot = block.clone();
-                let js_ctrl: VisitControlJs = cb.call(
+                let (tx, rx) = std::sync::mpsc::channel::<VisitControlJs>();
+                cb.call_with_return_value(
                     Ok(snapshot),
                     napi::threadsafe_function::ThreadsafeFunctionCallMode::Blocking,
+                    move |d: napi::Result<VisitControlJs>, _| {
+                        let _ = tx.send(d.unwrap_or_default());
+                        Ok(())
+                    },
                 );
+                let js_ctrl = rx.recv().unwrap_or_default();
                 js_ctrl.into()
             }
             #[cfg(not(feature = "napi"))]
@@ -170,10 +178,16 @@ impl AstVisitor for JsVisitor {
             #[cfg(feature = "napi")]
             Some(cb) => {
                 let snapshot = inline.clone();
-                let js_ctrl: InlineVisitControlJs = cb.call(
+                let (tx, rx) = std::sync::mpsc::channel::<InlineVisitControlJs>();
+                cb.call_with_return_value(
                     Ok(snapshot),
                     napi::threadsafe_function::ThreadsafeFunctionCallMode::Blocking,
+                    move |d: napi::Result<InlineVisitControlJs>, _| {
+                        let _ = tx.send(d.unwrap_or_default());
+                        Ok(())
+                    },
                 );
+                let js_ctrl = rx.recv().unwrap_or_default();
                 js_ctrl.into()
             }
             #[cfg(not(feature = "napi"))]
@@ -211,7 +225,7 @@ impl AstVisitor for JsVisitor {
 ///
 /// [`add_visitor`]: Self::add_visitor
 /// [`visit_all`]: Self::visit_all
-#[cfg_attr(feature = "napi", napi::napi)]
+#[cfg_attr(feature = "napi", napi)]
 pub struct PeisarAstJs {
     /// The parsed AST document (private — use [`ast_json`][Self::get_ast_json]
     /// or [`frontmatter`][Self::get_frontmatter] getters which auto-run
@@ -223,12 +237,12 @@ pub struct PeisarAstJs {
     frontmatter: Option<serde_json::Value>,
 }
 
-#[cfg_attr(feature = "napi", napi::napi)]
+#[cfg_attr(feature = "napi", napi)]
 impl PeisarAstJs {
     /// Create a new `PeisarAstJs` from raw Markdown text.
     ///
     /// If `options` is `None`, defaults are used (GFM + Kramdown enabled).
-    #[cfg_attr(feature = "napi", napi::constructor)]
+    #[cfg_attr(feature = "napi", napi(constructor))]
     pub fn new(raw_md: String, options: Option<AstOptions>) -> Self {
         let opts = options.unwrap_or_else(AstOptions::default);
         let f_n = opts.file_name.clone();
@@ -293,11 +307,11 @@ impl PeisarAstJs {
     /// Runs [`visit_all`](Self::visit_all) first if there are registered
     /// visitors, so the returned AST always reflects visitor mutations.
     #[cfg_attr(feature = "napi", napi)]
-    pub fn ast(&mut self) -> &Document {
+    pub fn ast(&mut self) -> String {
         if !self.visitors.is_empty() {
             self.visit_all();
         }
-        &self.ast
+        serde_json::to_string(&self.ast).unwrap_or_default()
     }
 
     /// Get a JSON-serializable copy of the AST document.
@@ -305,11 +319,11 @@ impl PeisarAstJs {
     /// Runs [`visit_all`](Self::visit_all) first if there are registered
     /// visitors.
     #[cfg_attr(feature = "napi", napi(getter))]
-    pub fn get_ast_json(&mut self) -> serde_json::Value {
+    pub fn get_ast_json(&mut self) -> String {
         if !self.visitors.is_empty() {
             self.visit_all();
         }
-        serde_json::to_value(&self.ast).unwrap_or(serde_json::Value::Null)
+        serde_json::to_string(&self.ast).unwrap_or_default()
     }
 
     /// Get the parsed YAML front-matter (if any).
@@ -317,10 +331,12 @@ impl PeisarAstJs {
     /// Runs [`visit_all`](Self::visit_all) first if there are registered
     /// visitors.
     #[cfg_attr(feature = "napi", napi(getter))]
-    pub fn get_frontmatter(&mut self) -> Option<serde_json::Value> {
+    pub fn get_frontmatter(&mut self) -> Option<String> {
         if !self.visitors.is_empty() {
             self.visit_all();
         }
-        self.frontmatter.clone()
+        self.frontmatter
+            .as_ref()
+            .map(|v| serde_json::to_string(v).unwrap_or_default())
     }
 }

@@ -1,25 +1,27 @@
 [package]
-name = "peisar_ast"
+name = "peisar_html"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-readme = "README.md"
-
+description = "Render a peisar_ast Markdown AST into HTML"
 
 [dependencies]
 serde = { workspace = true }
-serde_json = { workspace = true }
-peisar_frontmatter = { workspace = true }
+peisar_ast = { workspace = true }
 napi-derive = { workspace = true }
 napi = { workspace = true, optional = true }
 
 [features]
 default = []
-# Enable napi-rs derive macros on all public types.
-napi = ["dep:napi"]
+# Enable napi-rs derive macros (for Node.js builds).
+napi = ["dep:napi", "peisar_ast/napi"]
 
 [lib]
-name = "peisar_ast"
+name = "peisar_html"
 path = "src/lib.rs"
+
+[[example]]
+name = "basic"
+path = "examples/basic.rs"

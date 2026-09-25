@@ -23,7 +23,7 @@
 
 use crate::options::AstOptions;
 use crate::tokens::{
-    span::{Position, Span},
+    span::{Index, Position, Span},
     token::{EmphasisLevel, Inline},
 };
 use std::collections::HashMap;
@@ -261,9 +261,9 @@ impl InlineCtx {
                 }
         };
         Position {
-            line,
-            column,
-            offset,
+            line: line as Index,
+            column: column as Index,
+            offset: offset as Index,
         }
     }
 }

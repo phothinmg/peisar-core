@@ -50,8 +50,8 @@
 
 mod nodes;
 mod options;
-pub mod parsers;
-pub mod tokens;
+mod parsers;
+mod tokens;
 
 #[cfg(feature = "napi")]
 pub mod js;
@@ -60,6 +60,7 @@ pub mod js;
 pub use nodes::{Document, token};
 pub use options::AstOptions;
 pub use parsers::visitor::AstVisitor;
+pub use tokens::Attributes;
 pub use tokens::token::LinkReferenceDefinition;
 
 // Re-export JS callback-based API (available under `napi` feature).

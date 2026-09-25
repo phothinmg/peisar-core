@@ -6,6 +6,8 @@
 //! and can render them as an HTML attribute string via
 //! [`Attributes::to_html_attr_string`].
 
+#[cfg(feature = "napi")]
+use napi_derive::napi;
 use serde::Serialize;
 
 /// Parsed Kramdown block attributes (`{:#id .class key="val"}`).
@@ -25,7 +27,7 @@ use serde::Serialize;
 ///     "id=\"intro\" class=\"banner wide\" data-index=\"42\""
 /// );
 /// ```
-#[cfg_attr(feature = "napi", napi::napi(object))]
+#[cfg_attr(feature = "napi", napi(object))]
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct Attributes {
     /// HTML `id` attribute.
@@ -48,18 +50,13 @@ impl Attributes {
         if let Some(ref id) = self.id {
             parts.push(format!("id=\"{}\"", escape_attr(id)));
         }
-        if !self.classes.is_none() {
-            // let classes = self.classes.clone().unwrap();
-            parts.push(format!(
-                "class=\"{}\"",
-                escape_attr(&self.classes.clone().unwrap().join(" "))
-            ));
+        if let Some(ref classes) = self.classes {
+            parts.push(format!("class=\"{}\"", escape_attr(&classes.join(" "))));
         }
-        for (k, v) in &self.attributes.clone().unwrap() {
-            if k == "style" {
-                parts.push(format!("style=\"{}\"", escape_attr(v)));
+        if let Some(ref attrs) = self.attributes {
+            for (k, v) in attrs {
+                parts.push(format!("{}=\"{}\"", escape_attr(k), escape_attr(v)));
             }
-            parts.push(format!("{}=\"{}\"", escape_attr(k), escape_attr(v)));
         }
         parts.join(" ")
     }

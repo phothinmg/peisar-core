@@ -5,6 +5,8 @@
 //! or [`md_to_ast`](crate::parsers::md_to_ast).
 
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "napi")]
+use napi_derive::napi;
 
 /// Options that control how Markdown is parsed.
 ///
@@ -22,6 +24,7 @@ use serde::{Deserialize, Serialize};
 ///     file_name: None,
 /// };
 /// ```
+#[cfg_attr(feature = "napi", napi(object))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AstOptions {
     /// Enable GitHub Flavored Markdown (tables, strikethrough, task lists,

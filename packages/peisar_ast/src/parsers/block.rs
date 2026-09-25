@@ -23,7 +23,7 @@ use super::table::{build_table, is_table_start, parse_delimiter_alignments};
 use crate::options::AstOptions;
 use crate::tokens::{
     Attributes,
-    span::{Position, Span},
+    span::{Index, Position, Span},
     token::{Block, LinkReferenceDefinition, ListItem, TaskState},
 };
 /// Compute the byte offset of the start of each line.
@@ -111,9 +111,9 @@ impl<'a> ParserState<'a> {
         let line = line.min(self.line_starts.len().saturating_sub(1));
         let offset = self.line_starts[line].min(self.input.len());
         Position {
-            line,
+            line: line as Index,
             column: 0,
-            offset,
+            offset: offset as Index,
         }
     }
     /// Span covering lines `[from, to)` (half-open).
@@ -790,14 +790,14 @@ pub fn parse_link_ref_def_line(
     let end_offset = (start_offset + line.len()).min(input.len());
     let pos = Span::new(
         Position {
-            line: line_idx,
+            line: line_idx as Index,
             column: 0,
-            offset: start_offset,
+            offset: start_offset as Index,
         },
         Position {
-            line: line_idx,
-            column: line.chars().count(),
-            offset: end_offset,
+            line: line_idx as Index,
+            column: line.chars().count() as Index,
+            offset: end_offset as Index,
         },
     );
 

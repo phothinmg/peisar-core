@@ -11,23 +11,34 @@
 
 use serde::Serialize;
 
+#[cfg(feature = "napi")]
+use napi_derive::napi;
+
+/// Under the `napi` feature `usize` is not a supported N-API type, so we
+/// expose the integer fields as `u32` instead. In pure-Rust builds `u32`
+/// and `usize` are kept separate via this alias to avoid silent truncation.
+#[cfg(not(feature = "napi"))]
+pub type Index = usize;
+#[cfg(feature = "napi")]
+pub type Index = u32;
+
 /// A zero-based point in the source text.
-#[cfg_attr(feature = "napi", napi::napi(object))]
+#[cfg_attr(feature = "napi", napi(object))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 pub struct Position {
     /// Line number, 0-based.
-    pub line: usize,
+    pub line: Index,
     /// Column number, 0-based (in characters).
-    pub column: usize,
+    pub column: Index,
     /// Byte offset from the start of the input.
-    pub offset: usize,
+    pub offset: Index,
 }
 
 /// A half-open span `[start, end)` covering a node's source text.
 ///
 /// Both `start` and `end` are inclusive [`Position`]s that point into the
 /// original source string.
-#[cfg_attr(feature = "napi", napi::napi(object))]
+#[cfg_attr(feature = "napi", napi(object))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 pub struct Span {
     /// The start position (inclusive).
@@ -47,9 +58,9 @@ impl Position {
     /// Create a new position at the given `line`, `column`, and byte `offset`.
     pub fn new(line: usize, column: usize, offset: usize) -> Self {
         Self {
-            line,
-            column,
-            offset,
+            line: line.try_into().unwrap(),
+            column: column.try_into().unwrap(),
+            offset: offset.try_into().unwrap(),
         }
     }
 }
