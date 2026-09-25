@@ -24,7 +24,8 @@ extraction, and a visitor-based transformation API.
 - **JSON output** — all node types implement `serde::Serialize` for
   straightforward JSON AST serialisation.
 - **napi-rs ready** — every public type carries `#[cfg_attr(feature = "napi", napi::napi)]`
-  annotations; enable the `napi` feature when building for Node.js.
+  annotations; a callback-based `PeisarAstJs` API is available for JavaScript.
+  Enable the `napi` feature when building for Node.js.
 
 ## Installation
 
@@ -168,8 +169,16 @@ impl AstVisitor for LinkCounter {
 let md = "[a](http://x) and [b][ref]\n\n[ref]: http://y\n";
 let mut ast = PeisarAst::<LinkCounter>::new(md, None);
 ast.add_visitor(LinkCounter { count: 0 });
+
+// visit_all() runs automatically when ast() / frontmatter() are called,
+// but can also be called explicitly:
 ast.visit_all();
 ```
+
+> **Auto-visit:** `ast()`, `ast_mut()`, `take_ast()`, `frontmatter()`, and
+> `take_frontmatter()` all automatically call `visit_all()` before returning
+> when there are registered visitors. You only need to call `visit_all()`
+> manually if you want to run visitors at a specific point.
 
 ### `VisitControl` / `InlineVisitControl`
 
@@ -185,20 +194,118 @@ Convenience constructors: `keep_and_recurse()`, `remove()`, `replace_with(nodes)
 
 ## `PeisarAst` API
 
-| Method                 | Description                                            |
-| ---------------------- | ------------------------------------------------------ |
-| `new(raw_md, options)` | Parse Markdown; front-matter is extracted and stripped |
-| `add_visitor(visitor)` | Register a visitor (run in insertion order)            |
-| `visit_all()`          | Run all registered visitors (pre-order)                |
-| `clear_visitors()`     | Remove all visitors, keep AST                          |
-| `take_visitors()`      | Take ownership of the visitor vector                   |
-| `ast()` / `ast_mut()`  | Borrow the parsed `Document`                           |
-| `take_ast()`           | Consume and return the `Document`                      |
-| `frontmatter()`        | Borrow the parsed front-matter value (if any)          |
-| `take_frontmatter()`   | Consume and return the front-matter value              |
+| Method                 | Description                                                                  |
+| ---------------------- | ---------------------------------------------------------------------------- |
+| `new(raw_md, options)` | Parse Markdown; front-matter is extracted and stripped                       |
+| `add_visitor(visitor)` | Register a visitor (run in insertion order)                                  |
+| `visit_all()`          | Run all registered visitors (pre-order); no-op if no visitors registered     |
+| `clear_visitors()`     | Remove all visitors, keep AST                                                |
+| `take_visitors()`      | Take ownership of the visitor vector                                         |
+| `ast()` / `ast_mut()`  | Borrow the parsed `Document`; auto-runs `visit_all()` if visitors registered |
+| `take_ast()`           | Consume and return the `Document`; auto-runs `visit_all()` first             |
+| `frontmatter()`        | Borrow the parsed front-matter value; auto-runs `visit_all()` first          |
+| `take_frontmatter()`   | Consume and return the front-matter; auto-runs `visit_all()` first           |
 
 The struct is generic over the visitor type `V` and the front-matter type `F`
 (defaults to `serde_json::Value`). `F` must implement `serde::de::DeserializeOwned`.
+
+> **Auto-visit:** the `ast()`, `ast_mut()`, `take_ast()`, `frontmatter()`, and
+> `take_frontmatter()` methods automatically call `visit_all()` before
+> returning when there are registered visitors. This guarantees that the
+> AST and front-matter you read always reflect visitor mutations.
+
+## JavaScript (napi-rs) API
+
+When built with the `napi` feature, `peisar_ast` exports a
+callback-based API that mirrors the Rust `PeisarAst` / `AstVisitor`
+system. Because napi-rs cannot export Rust traits or generics, JS
+consumers use `PeisarAstJs` and pass callback functions instead of
+implementing a trait.
+
+### `PeisarAstJs`
+
+```js
+const { PeisarAstJs } = require("@peisar/ast");
+
+// --- Basic parsing ---
+const ast = new PeisarAstJs(
+  "---\ntitle: Hello\n---\n\n# Heading\n\nA paragraph with [a link](https://example.com).",
+  undefined, // AstOptions (undefined = defaults: GFM + Kramdown)
+);
+
+// --- Register a visitor via callbacks ---
+// block_cb receives a Block node, returns a VisitControlJs.
+// inline_cb receives an Inline node, returns an InlineVisitControlJs.
+ast.addVisitor(
+  // block callback
+  (block) => {
+    if (block.type === "heading") {
+      console.log("heading level:", block.level);
+    }
+    return { recurse: true }; // recurse into inline children
+  },
+  // inline callback
+  (inline) => {
+    if (inline.type === "link") {
+      console.log("link:", inline.url);
+    }
+    return {}; // keep, no recurse
+  },
+);
+
+// --- Read results ---
+// No explicit visitAll() needed — getters auto-run visitors.
+console.log(JSON.stringify(ast.astJson, null, 2));
+console.log(ast.frontmatter); // { title: "Hello" }
+```
+
+### `PeisarAstJs` methods
+
+| Method                          | Description                                                             |
+| ------------------------------- | ----------------------------------------------------------------------- |
+| `new(rawMd, options)`           | Parse Markdown; front-matter extracted and stored                       |
+| `addVisitor(blockCb, inlineCb)` | Register a visitor (two callbacks; either may be `null`/`undefined`)    |
+| `visitAll()`                    | Run all registered visitors; no-op if none registered                   |
+| `clearVisitors()`               | Remove all visitors                                                     |
+| `ast()`                         | Borrow the `Document`; auto-runs `visitAll()` if visitors registered    |
+| `astJson` (getter)              | JSON-serializable AST; auto-runs `visitAll()` if visitors registered    |
+| `frontmatter` (getter)          | Parsed YAML front-matter (`null` if none); auto-runs `visitAll()` first |
+
+### `VisitControlJs` / `InlineVisitControlJs`
+
+JS callbacks return a plain object with any of these optional fields:
+
+| Field          | Type                   | Effect                                             |
+| -------------- | ---------------------- | -------------------------------------------------- |
+| `insertBefore` | `Block[]` / `Inline[]` | Insert nodes before the current node               |
+| `insertAfter`  | `Block[]` / `Inline[]` | Insert nodes after the current node                |
+| `replaceWith`  | `Block[]` / `Inline[]` | Replace the current node with the given nodes      |
+| `remove`       | `boolean`              | Remove the current node entirely                   |
+| `recurse`      | `boolean`              | Recurse into the node's children (default `false`) |
+
+Returning `undefined` or `{}` keeps the node as-is (no recurse).
+
+### JS example: remove all links
+
+```js
+const { PeisarAstJs } = require("@peisar/ast");
+
+const ast = new PeisarAstJs("# Hi\n\nA [link](http://x) here.", undefined);
+
+ast.addVisitor(
+  null, // no block callback
+  (inline) => {
+    if (inline.type === "link") {
+      return { remove: true };
+    }
+    return {};
+  },
+);
+
+const json = ast.astJson;
+console.log(JSON.stringify(json, null, 2));
+// The link node is removed from the paragraph's inline children.
+```
 
 ## JSON serialisation
 

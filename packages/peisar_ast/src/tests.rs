@@ -540,7 +540,7 @@ fn test_empty_document() {
 fn test_peisar_ast_basic() {
     use crate::PeisarAst;
     let md = "# Hello\n\nWorld.\n";
-    let ast: PeisarAst<NoopVisitor> = PeisarAst::new(md, None);
+    let mut ast: PeisarAst<NoopVisitor> = PeisarAst::new(md, None);
     assert_eq!(ast.ast().children.len(), 2);
 }
 
@@ -558,7 +558,7 @@ fn test_peisar_ast_take_ast() {
 fn test_peisar_ast_frontmatter() {
     use crate::PeisarAst;
     let md = "---\ntitle: Test\n---\n\n# Hello\n";
-    let ast: PeisarAst<NoopVisitor> = PeisarAst::new(md, None);
+    let mut ast: PeisarAst<NoopVisitor> = PeisarAst::new(md, None);
     // Front-matter should be parsed (serde_json::Value by default)
     // With () as front-matter type, frontmatter will be None or parsed
     // depending on whether the YAML can deserialize into ().

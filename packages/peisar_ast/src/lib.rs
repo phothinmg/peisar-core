@@ -53,11 +53,20 @@ mod options;
 pub mod parsers;
 pub mod tokens;
 
+#[cfg(feature = "napi")]
+pub mod js;
+
 // Re-export
 pub use nodes::{Document, token};
 pub use options::AstOptions;
 pub use parsers::visitor::AstVisitor;
 pub use tokens::token::LinkReferenceDefinition;
+
+// Re-export JS callback-based API (available under `napi` feature).
+#[cfg(feature = "napi")]
+pub use js::{
+    BlockCallback, InlineCallback, InlineVisitControlJs, JsVisitor, PeisarAstJs, VisitControlJs,
+};
 // Use for PeisarAst
 use parsers::md_to_ast;
 use parsers::visitor::visit_document_mut;
@@ -159,27 +168,57 @@ where
     }
 
     /// Borrow the parsed AST.
-    pub fn ast(&self) -> &Document {
+    ///
+    /// Runs [`visit_all`](Self::visit_all) first when there are registered
+    /// visitors, so the returned AST always reflects visitor mutations.
+    pub fn ast(&mut self) -> &Document {
+        if !self.visitors.is_empty() {
+            self.visit_all();
+        }
         &self.ast
     }
 
     /// Borrow the parsed AST mutably.
+    ///
+    /// Runs [`visit_all`](Self::visit_all) first when there are registered
+    /// visitors.
     pub fn ast_mut(&mut self) -> &mut Document {
+        if !self.visitors.is_empty() {
+            self.visit_all();
+        }
         &mut self.ast
     }
 
     /// Consume and return the AST, leaving a default [`Document`] in its place.
+    ///
+    /// Runs [`visit_all`](Self::visit_all) first when there are registered
+    /// visitors.
     pub fn take_ast(&mut self) -> Document {
+        if !self.visitors.is_empty() {
+            self.visit_all();
+        }
         std::mem::take(&mut self.ast)
     }
 
     /// Borrow the parsed front-matter (if any).
-    pub fn frontmatter(&self) -> Option<&F> {
+    ///
+    /// Runs [`visit_all`](Self::visit_all) first when there are registered
+    /// visitors.
+    pub fn frontmatter(&mut self) -> Option<&F> {
+        if !self.visitors.is_empty() {
+            self.visit_all();
+        }
         self.frontmatter.as_ref()
     }
 
     /// Consume and return the front-matter value, leaving `None` in its place.
+    ///
+    /// Runs [`visit_all`](Self::visit_all) first when there are registered
+    /// visitors.
     pub fn take_frontmatter(&mut self) -> Option<F> {
+        if !self.visitors.is_empty() {
+            self.visit_all();
+        }
         self.frontmatter.take()
     }
 }
