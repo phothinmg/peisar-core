@@ -1,12 +1,49 @@
+//! Inline-level Markdown parser.
+//!
+//! This module parses inline Markdown constructs within a paragraph, heading,
+//! or table cell into a list of [`Inline`] nodes.  Supported constructs:
+//!
+//! - Plain text
+//! - Emphasis (`*italic*`, `**bold**`, `_italic_`, `__bold__`)
+//! - Inline code (`` `code` ``)
+//! - Inline HTML
+//! - GFM strikethrough (`~~text~~`)
+//! - Images (`![alt](url)`)
+//! - Inline links (`[text](url)`)
+//! - Reference-style links (`[text][label]`, `[label][]`, `[label]`)
+//! - GFM autolinks (bare URLs)
+//! - Hard and soft line breaks
+//!
+//! ## Link reference resolution
+//!
+//! Reference-style links are resolved against a [`LinkRefMap`] that is
+//! collected in a pre-pass by [`md_to_ast`](super::md_to_ast).  Use
+//! [`parse_inline_with_refs`] when you have a ref map, or [`parse_inline`]
+//! when you do not need reference resolution.
+
 use crate::options::AstOptions;
 use crate::tokens::{
     span::{Position, Span},
     token::{EmphasisLevel, Inline},
 };
+use std::collections::HashMap;
+
+/// A map of normalised link reference labels to `(url, title)`.
+pub type LinkRefMap = HashMap<String, (String, Option<String>)>;
 
 /// Parse inline markdown into a list of [`Inline`] nodes.
 /// Parse inline markdown with the given options (controls GFM features).
 pub fn parse_inline(input: &str, options: Option<&AstOptions>) -> Vec<Inline> {
+    parse_inline_with_refs(input, options, None)
+}
+
+/// Parse inline markdown with an optional link reference map for resolving
+/// reference-style links (`[text][label]`, `[label][]`, `[label]`).
+pub fn parse_inline_with_refs(
+    input: &str,
+    options: Option<&AstOptions>,
+    refs: Option<&LinkRefMap>,
+) -> Vec<Inline> {
     let binding = AstOptions::default();
     let opts = options.unwrap_or(&binding);
     let mut tokens: Vec<Inline> = Vec::new();
@@ -56,9 +93,18 @@ pub fn parse_inline(input: &str, options: Option<&AstOptions>) -> Vec<Inline> {
             }
         }
 
-        // Link: [text](url)
+        // Link: [text](url) or reference link [text][label], [label][], [label]
         if c == '[' {
+            // First try inline link `[text](url)`
             if let Some((link, end)) = match_link(&chars, i, &ctx, options) {
+                flush_text(&mut tokens, &mut text, &mut text_start, &ctx, &chars);
+                tokens.push(link);
+                i = end;
+                text_start = i;
+                continue;
+            }
+            // Then try reference link `[text][label]`, `[label][]`, `[label]`
+            if let Some((link, end)) = match_reference_link(&chars, i, &ctx, options, refs) {
                 flush_text(&mut tokens, &mut text, &mut text_start, &ctx, &chars);
                 tokens.push(link);
                 i = end;
@@ -164,6 +210,10 @@ pub fn parse_inline(input: &str, options: Option<&AstOptions>) -> Vec<Inline> {
     tokens
 }
 
+/// Internal context for mapping character indices to source [`Position`]s.
+///
+/// Maintains precomputed line-start char indices and char-to-byte offset
+/// tables so that [`InlineCtx::position`] runs in O(log n) time.
 pub struct InlineCtx {
     /// `line_starts_char[l]` = char index at which line `l` begins.
     line_starts_char: Vec<usize>,
@@ -323,6 +373,58 @@ fn match_inline_code(chars: &[char], start: usize, tick_count: usize) -> Option<
     let code = rest_str[..close_idx].to_string();
     let end = start + tick_count + close_idx + tick_count;
     Some((code, end))
+}
+
+/// Match a reference-style link starting at `chars[start]` (which must be `[`).
+/// Supports full: `[text][label]`, collapsed: `[label][]`, and shortcut: `[label]`.
+fn match_reference_link(
+    chars: &[char],
+    start: usize,
+    ctx: &InlineCtx,
+    options: Option<&AstOptions>,
+    refs: Option<&LinkRefMap>,
+) -> Option<(Inline, usize)> {
+    let refs = refs?;
+    if chars.get(start)? != &'[' {
+        return None;
+    }
+
+    // Find the closing `]` of the first bracket group, respecting nested brackets
+    let (text, after_first) = match_bracket(chars, start, '[')?;
+
+    // Check for a second `[label]` group
+    let (label, end) = if after_first < chars.len() && chars[after_first] == '[' {
+        // Full reference: [text][label]
+        let (label_text, after_label) = match_bracket(chars, after_first, '[')?;
+        let label_str = if label_text.trim().is_empty() {
+            // Collapsed: [text][] — use the text as the label
+            text.clone()
+        } else {
+            label_text
+        };
+        (label_str, after_label)
+    } else {
+        // Shortcut: [label]
+        (text.clone(), after_first)
+    };
+
+    let normalized = super::block::normalize_label(&label);
+    let (url, title) = refs.get(&normalized)?;
+
+    let children = parse_inline(&text, options);
+    Some((
+        Inline::LinkReference {
+            text: children,
+            label: normalized,
+            url: url.clone(),
+            title: title.clone(),
+            pos: Span::new(
+                ctx.position(start, chars.len()),
+                ctx.position(end, chars.len()),
+            ),
+        },
+        end,
+    ))
 }
 
 fn match_link(

@@ -5,7 +5,6 @@ members = [
     "packages/peisar_frontmatter",
     "packages/peisar_fs",
     "packages/peisar_log",
-    "packages/peisar_visitor",
 ]
 
 [workspace.package]
@@ -20,7 +19,6 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_yaml = "0.9"
 colored = "2"
 serde_json = "1.0"
-syntect = "5.3"
 peisar_log = { path = "./packages/peisar_log" }
 peisar_frontmatter = { path = "./packages/peisar_frontmatter" }
 peisar_ast = { path = "./packages/peisar_ast" }

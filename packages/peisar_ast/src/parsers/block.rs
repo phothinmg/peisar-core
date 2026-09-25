@@ -1,13 +1,44 @@
+//! Block-level Markdown parser.
+//!
+//! This module implements the block-level parser that converts lines of
+//! Markdown source text into [`Block`] nodes.  It supports:
+//!
+//! - ATX headings (`#` … `######`)
+//! - Fenced and indented code blocks
+//! - Block quotes
+//! - Ordered and unordered lists (with GFM task-list markers)
+//! - Thematic breaks
+//! - HTML blocks and HTML comments (`<!-- ... -->`)
+//! - GFM tables
+//! - Link reference definitions (`[label]: url "title"`)
+//! - Kramdown block attributes (`{: #id .class}`)
+//!
+//! The [`ParserState`] struct holds the parser's cursor position and shared
+//! context.  The [`md_to_ast`](super::md_to_ast) function creates a
+//! `ParserState` and drives it to completion.
+
 use super::atters::parse_attrs;
-use super::inline::parse_inline;
+use super::inline::{LinkRefMap, parse_inline_with_refs};
 use super::table::{build_table, is_table_start, parse_delimiter_alignments};
 use crate::options::AstOptions;
 use crate::tokens::{
     Attributes,
     span::{Position, Span},
-    token::{Block, ListItem, TaskState},
+    token::{Block, LinkReferenceDefinition, ListItem, TaskState},
 };
-/// Byte offset of the start of each line (line 0 starts at offset 0).
+/// Compute the byte offset of the start of each line.
+///
+/// Line 0 always starts at offset 0.  For each `\n` in `input`, a new
+/// entry is added pointing to the byte immediately after the newline.
+///
+/// # Example
+///
+/// ```rust
+/// use peisar_ast::parsers::block::compute_line_starts;
+///
+/// let starts = compute_line_starts("a\nbb\nccc");
+/// assert_eq!(starts, vec![0, 2, 5]);
+/// ```
 pub fn compute_line_starts(input: &str) -> Vec<usize> {
     let mut starts = vec![0usize];
     for (i, b) in input.bytes().enumerate() {
@@ -18,22 +49,36 @@ pub fn compute_line_starts(input: &str) -> Vec<usize> {
     starts
 }
 
+/// Internal parser state for block-level parsing.
+///
+/// Holds a reference to the source text, the line slice, line-start offsets,
+/// parser options, and the link reference map (for resolving reference-style
+/// links during inline parsing).
 pub struct ParserState<'a> {
+    /// The full source text.
     pub input: &'a str,
+    /// Lines of the source text (split on `\n`).
     pub lines: &'a [&'a str],
     /// Byte offset of the start of each line.
     pub line_starts: &'a [usize],
+    /// Current line index (0-based).
     pub pos: usize,
+    /// Parser options.
     pub opts: &'a AstOptions,
+    /// Optional file name.
     pub file_name: Option<String>,
+    /// Link reference definitions collected in the pre-pass.
+    pub refs: &'a LinkRefMap,
 }
 impl<'a> ParserState<'a> {
+    /// Create a new `ParserState` from the given source and options.
     pub fn new(
         input: &'a str,
         lines: &'a [&'a str],
         line_starts: &'a [usize],
         opts: &'a AstOptions,
         file_name: Option<String>,
+        refs: &'a LinkRefMap,
     ) -> Self {
         Self {
             input,
@@ -42,17 +87,21 @@ impl<'a> ParserState<'a> {
             pos: 0,
             opts,
             file_name,
+            refs,
         }
     }
 
+    /// Returns `true` if the parser has consumed all lines.
     pub fn is_done(&self) -> bool {
         self.pos >= self.lines.len()
     }
 
+    /// Returns the current line, or `None` if at end of input.
     pub fn current(&self) -> Option<&'a str> {
         self.lines.get(self.pos).copied()
     }
 
+    /// Advance to the next line.
     pub fn advance(&mut self) {
         self.pos += 1;
     }
@@ -84,6 +133,11 @@ impl<'a> ParserState<'a> {
         }
         self.pos > start
     }
+    /// Parse the current line as a block-level node.
+    ///
+    /// Returns `Some(Block)` if a block was successfully parsed, or `None`
+    /// if no block construct matched.  Advances the parser position past
+    /// the consumed lines.
     pub fn parse_block(&mut self) -> Option<Block> {
         let line = self.current()?;
         let start_line = self.pos;
@@ -127,6 +181,10 @@ impl<'a> ParserState<'a> {
 
         // HTML block
         if is_html_block_start(line) {
+            // HTML comment block
+            if line.trim_start().starts_with("<!--") {
+                return Some(self.parse_html_comment(start_line));
+            }
             let html = self.collect_html_block();
             let attrs = self.try_trailing_attrs();
             return Some(Block::HtmlBlock {
@@ -135,6 +193,12 @@ impl<'a> ParserState<'a> {
                 pos: self.span(start_line, self.pos),
             });
         }
+
+        // Link reference definition: `[label]: url "title"`
+        if let Some(block) = self.try_link_reference_definition() {
+            return Some(block);
+        }
+
         // Default: paragraph
         Some(self.parse_paragraph())
     }
@@ -201,6 +265,107 @@ impl<'a> ParserState<'a> {
         block
     }
     // -----------------------------------------------------------------------
+    // Link Reference Definitions
+    // -----------------------------------------------------------------------
+
+    /// Try to parse a link reference definition: `[label]: url "title"`
+    fn try_link_reference_definition(&mut self) -> Option<Block> {
+        let line = self.current()?;
+        let trimmed = line.trim_start();
+
+        // Must start with `[`
+        if !trimmed.starts_with('[') {
+            return None;
+        }
+
+        // Find the closing `]`
+        let after_open = &trimmed[1..];
+        let bracket_close = match after_open.find(']') {
+            Some(idx) => 1 + idx, // index in trimmed
+            None => return None,
+        };
+
+        // Must be followed by `:`
+        let after_bracket = &trimmed[bracket_close + 1..];
+        if !after_bracket.trim_start().starts_with(':') {
+            return None;
+        }
+
+        // Parse the label
+        let label_raw: String = trimmed[1..bracket_close].to_string();
+        if label_raw.trim().is_empty() {
+            return None;
+        }
+        let label = normalize_label(&label_raw);
+
+        // Everything after `:`
+        let after_colon = &after_bracket.trim_start()[1..]; // skip ':'
+        let rest = after_colon.trim_start();
+
+        // Parse URL — may be wrapped in `<...>` or bare
+        let (url, after_url) = parse_link_url(rest);
+
+        // Parse optional title
+        let title_part = after_url.trim();
+        let (title, _consumed) = parse_link_title(title_part);
+
+        let start_line = self.pos;
+        self.advance();
+
+        Some(Block::LinkReferenceDefinition {
+            label,
+            url,
+            title,
+            pos: self.span(start_line, self.pos),
+        })
+    }
+
+    // -----------------------------------------------------------------------
+    // HTML Comment
+    // -----------------------------------------------------------------------
+
+    /// Parse an HTML comment block starting with `<!--`.
+    fn parse_html_comment(&mut self, start_line: usize) -> Block {
+        let mut content = String::new();
+        let mut found_close = false;
+
+        while let Some(line) = self.current() {
+            if !found_close {
+                content.push_str(line);
+                content.push('\n');
+                if let Some(_pos) = line.find("-->") {
+                    found_close = true;
+                    self.advance();
+                    break;
+                }
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        // If we never found -->, keep consuming until blank line (HTML block condition)
+        if !found_close {
+            while let Some(line) = self.current() {
+                if line.trim().is_empty() {
+                    break;
+                }
+                content.push_str(line);
+                content.push('\n');
+                self.advance();
+            }
+        }
+
+        // Strip the `<!--` prefix and `-->` suffix to extract the comment value
+        let value = extract_comment_content(&content);
+
+        Block::Comment {
+            value,
+            pos: self.span(start_line, self.pos),
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Headings
     // -----------------------------------------------------------------------
 
@@ -225,7 +390,7 @@ impl<'a> ParserState<'a> {
         let heading_text = text.to_string();
         let attrs = self.try_trailing_attrs();
 
-        let children = parse_inline(&heading_text, Some(self.opts));
+        let children = parse_inline_with_refs(&heading_text, Some(self.opts), Some(self.refs));
         Some(Block::Heading {
             level: hashes as u8,
             children,
@@ -457,6 +622,7 @@ impl<'a> ParserState<'a> {
                 || line.trim_start().starts_with('>')
                 || is_list_marker(line)
                 || is_html_block_start(line)
+                || is_link_ref_def(line)
             {
                 break;
             }
@@ -476,7 +642,7 @@ impl<'a> ParserState<'a> {
         let raw = text_lines.join("\n");
         let attrs = self.try_trailing_attrs();
 
-        let children = parse_inline(&raw, Some(self.opts));
+        let children = parse_inline_with_refs(&raw, Some(self.opts), Some(self.refs));
         Block::Paragraph {
             children,
             attrs,
@@ -510,6 +676,8 @@ fn is_kramdown_attr_line(line: &str) -> bool {
     t.starts_with('{') && t.ends_with('}')
 }
 
+/// Returns `true` if the line is a thematic break (`---`, `***`, or `___`
+/// with at least three identical characters, optionally spaced).
 pub fn is_thematic_break(line: &str) -> bool {
     let t: String = line.chars().filter(|c| !c.is_whitespace()).collect();
     if t.is_empty() {
@@ -519,6 +687,8 @@ pub fn is_thematic_break(line: &str) -> bool {
     (c == '-' || c == '*' || c == '_') && t.chars().all(|ch| ch == c) && t.len() >= 3
 }
 
+/// Returns `true` if the line starts with an HTML block: `<`, `</`, `<!`,
+/// or `<` followed by an ASCII letter.
 fn is_html_block_start(line: &str) -> bool {
     let t = line.trim_start();
     if !t.starts_with('<') {
@@ -533,6 +703,114 @@ fn is_html_block_start(line: &str) -> bool {
             .map_or(false, |c| c.is_ascii_alphabetic())
 }
 
+/// Returns `true` if the line looks like a link reference definition:
+/// `[label]: url ...`
+///
+/// This is a lightweight check — it only verifies the `[...]` `:` prefix.
+/// Use [`parse_link_ref_def_line`] for full parsing.
+pub fn is_link_ref_def(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    if !trimmed.starts_with('[') {
+        return false;
+    }
+    // Find closing `]` followed by `:`
+    let after_open = &trimmed[1..];
+    let bracket_close = match after_open.find(']') {
+        Some(idx) => idx + 1,
+        None => return false,
+    };
+    let after_bracket = trimmed.get(bracket_close + 1..);
+    match after_bracket {
+        Some(s) => s.trim_start().starts_with(':'),
+        None => false,
+    }
+}
+
+/// Parse a single line as a link reference definition.
+///
+/// Returns a [`LinkReferenceDefinition`] with position information, or
+/// `None` if the line is not a valid definition.
+///
+/// # Arguments
+///
+/// - `line` — the raw source line.
+/// - `line_idx` — 0-based line index in the document.
+/// - `line_starts` — byte offsets of each line start (from [`compute_line_starts`]).
+/// - `input` — the full source text (for offset clamping).
+pub fn parse_link_ref_def_line(
+    line: &str,
+    line_idx: usize,
+    line_starts: &[usize],
+    input: &str,
+) -> Option<LinkReferenceDefinition> {
+    let trimmed = line.trim_start();
+
+    // Must start with `[`
+    if !trimmed.starts_with('[') {
+        return None;
+    }
+
+    // Find the closing `]`
+    let after_open = &trimmed[1..];
+    let bracket_close = match after_open.find(']') {
+        Some(idx) => 1 + idx, // index in trimmed
+        None => return None,
+    };
+
+    // Must be followed by `:`
+    let after_bracket = &trimmed[bracket_close + 1..];
+    if !after_bracket.trim_start().starts_with(':') {
+        return None;
+    }
+
+    // Parse the label
+    let label_raw: String = trimmed[1..bracket_close].to_string();
+    if label_raw.trim().is_empty() {
+        return None;
+    }
+    let label = normalize_label(&label_raw);
+
+    // Everything after `:`
+    let after_colon = &after_bracket.trim_start()[1..]; // skip ':'
+    let rest = after_colon.trim_start();
+
+    // Parse URL — may be wrapped in `<...>` or bare
+    let (url, after_url) = parse_link_url(rest);
+
+    // Parse optional title
+    let title_part = after_url.trim();
+    let (title, _consumed) = parse_link_title(title_part);
+
+    // Compute position
+    let start_offset = line_starts
+        .get(line_idx)
+        .copied()
+        .unwrap_or(0)
+        .min(input.len());
+    let end_offset = (start_offset + line.len()).min(input.len());
+    let pos = Span::new(
+        Position {
+            line: line_idx,
+            column: 0,
+            offset: start_offset,
+        },
+        Position {
+            line: line_idx,
+            column: line.chars().count(),
+            offset: end_offset,
+        },
+    );
+
+    Some(LinkReferenceDefinition {
+        label,
+        url,
+        title,
+        pos,
+    })
+}
+
+/// Returns `true` if the line is a list marker: `-`, `*`, `+` followed by
+/// a space, or 1–9 digits followed by `.` or `)` and a space.
 pub fn is_list_marker(line: &str) -> bool {
     let t = line.trim_start();
     if t.starts_with("- ") || t.starts_with("* ") || t.starts_with("+ ") {
@@ -641,4 +919,97 @@ pub fn parse_task_marker(line: &str) -> Option<(TaskState, usize)> {
     } else {
         None
     }
+}
+
+// ---------------------------------------------------------------------------
+// Link reference definition helpers
+// ---------------------------------------------------------------------------
+
+/// Normalise a link label per CommonMark: trim, collapse internal whitespace
+/// to single spaces, lowercase.
+pub fn normalize_label(label: &str) -> String {
+    let trimmed = label.trim();
+    let mut result = String::with_capacity(trimmed.len());
+    let mut prev_ws = false;
+    for c in trimmed.chars() {
+        if c.is_whitespace() {
+            if !prev_ws {
+                result.push(' ');
+                prev_ws = true;
+            }
+        } else {
+            result.push(c.to_ascii_lowercase());
+            prev_ws = false;
+        }
+    }
+    result
+}
+
+/// Parse the URL portion of a link reference definition.
+/// Returns `(url, remaining_text)`.
+/// The URL may be wrapped in `<...>` or be bare (up to the first whitespace).
+pub fn parse_link_url(rest: &str) -> (String, &str) {
+    let rest = rest.trim_start();
+    if rest.starts_with('<') {
+        if let Some(close) = rest.find('>') {
+            return (rest[1..close].to_string(), &rest[close + 1..]);
+        }
+    }
+    // Bare URL: read until whitespace
+    let end = rest
+        .char_indices()
+        .find(|(_, c)| c.is_whitespace())
+        .map(|(i, _)| i)
+        .unwrap_or(rest.len());
+    (rest[..end].to_string(), &rest[end..])
+}
+
+/// Parse an optional link title: `"..."`, `'...'`, or `(...)` .
+/// Returns `(Some(title), consumed_len)` or `(None, 0)`.
+pub fn parse_link_title(rest: &str) -> (Option<String>, usize) {
+    let rest = rest.trim_start();
+    if rest.is_empty() {
+        return (None, 0);
+    }
+    let open = rest.chars().next().unwrap();
+    if open != '"' && open != '\'' && open != '(' {
+        return (None, 0);
+    }
+    let close = match open {
+        '"' => '"',
+        '\'' => '\'',
+        '(' => ')',
+        _ => return (None, 0),
+    };
+    // Find the closing delimiter
+    let chars: Vec<char> = rest.chars().collect();
+    let mut i = 1;
+    while i < chars.len() {
+        if chars[i] == close {
+            if open == '(' {
+                return (Some(chars[1..i].iter().collect()), i + 1);
+            }
+            return (Some(chars[1..i].iter().collect()), i + 1);
+        }
+        if chars[i] == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        i += 1;
+    }
+    (None, 0)
+}
+
+/// Extract the comment content from `<!-- ... -->`, stripping the markers
+/// and any leading/trailing whitespace.
+fn extract_comment_content(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if let Some(inner) = trimmed.strip_prefix("<!--") {
+        if let Some(inner) = inner.strip_suffix("-->") {
+            return inner.trim().to_string();
+        }
+        // No closing --> — return everything after <!--
+        return inner.trim().to_string();
+    }
+    trimmed.to_string()
 }

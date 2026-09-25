@@ -1,4 +1,10 @@
-# peisar_frontmatter
+<!-- markdownlint-disable MD033 -->
+<!-- markdownlint-disable MD041 -->
+<div align="center">
+<img src="https://pub-c9ba018358dd48a99b70013b65a25e5f.r2.dev/logo/peisar.webp" width="160" height="160" alt="peisar" />
+  <h1>Peisar</h1>
+  <p>Peisar Front Matter</p>
+</div>
 
 A small, focused Rust crate for parsing optional YAML front matter from Markdown documents and deserializing it into any serde-enabled type.
 
@@ -107,4 +113,3 @@ Contributions are welcome. Please:
 License
 
 See the [LICENSE](/home/ptm/Github/PEISAR/peisar-mono-repo/packages/peisar_frontmatter/LICENSE) file in this package.
-

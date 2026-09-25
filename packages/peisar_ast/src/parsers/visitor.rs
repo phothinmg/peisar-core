@@ -1,3 +1,34 @@
+//! AST visitor trait and traversal engine.
+//!
+//! The [`AstVisitor`] trait provides a pre-order callback API for visiting
+//! and mutating every block- and inline-level node in a [`Document`](super::Document).
+//!
+//! ## Usage
+//!
+//! Implement [`AstVisitor`] for a struct, register it with
+//! [`PeisarAst::add_visitor`](crate::PeisarAst::add_visitor), then call
+//! [`PeisarAst::visit_all`](crate::PeisarAst::visit_all).  Each visitor
+//! method receives a `&mut` reference to the node and returns a control
+//! struct that can request insertion, replacement, or removal.
+//!
+//! ## Example
+//!
+//! ```rust
+//! use peisar_ast::AstVisitor;
+//! use peisar_ast::token::{Block, Inline};
+//! use peisar_ast::parsers::visitor::{VisitControl, InlineVisitControl};
+//!
+//! struct LinkCounter { count: usize }
+//! impl AstVisitor for LinkCounter {
+//!     fn visit_inline(&mut self, inline: &mut Inline) -> InlineVisitControl {
+//!         if matches!(inline, Inline::Link { .. } | Inline::LinkReference { .. }) {
+//!             self.count += 1;
+//!         }
+//!         InlineVisitControl::default()
+//!     }
+//! }
+//! ```
+
 use crate::tokens::token::{Block, Inline};
 
 /// Visitor trait for AST nodes. Implement this trait to receive callbacks
@@ -66,26 +97,34 @@ impl VisitControl {
 /// nodes. Mirrors `VisitControl` but for `Inline` nodes.
 #[derive(Debug, Default)]
 pub struct InlineVisitControl {
+    /// Nodes to insert before the current node's position.
     pub insert_before: Vec<Inline>,
+    /// Nodes to insert after the current node's position.
     pub insert_after: Vec<Inline>,
+    /// Replace the current node with these nodes.
     pub replace_with: Option<Vec<Inline>>,
+    /// Remove the current node entirely.
     pub remove: bool,
+    /// Whether to recurse into this node's child nodes (when applicable).
     pub recurse: bool,
 }
 
 impl InlineVisitControl {
+    /// Convenience: keep the (possibly mutated) node and recurse into children.
     pub fn keep_and_recurse() -> Self {
         InlineVisitControl {
             recurse: true,
             ..Default::default()
         }
     }
+    /// Convenience: remove the node.
     pub fn remove() -> Self {
         InlineVisitControl {
             remove: true,
             ..Default::default()
         }
     }
+    /// Convenience: replace current node with given nodes.
     pub fn replace_with(nodes: Vec<Inline>) -> Self {
         InlineVisitControl {
             replace_with: Some(nodes),
@@ -173,7 +212,8 @@ fn visit_blocks_vec<V: AstVisitor + ?Sized>(children: &mut Vec<Block>, visitor: 
                 Block::Table { table, .. } => {
                     visit_table(table, visitor);
                 }
-                // CodeBlock, ThematicBreak, HtmlBlock have no nested AST children
+                // CodeBlock, ThematicBreak, HtmlBlock, LinkReferenceDefinition,
+                // and Comment have no nested AST children
                 _ => {}
             }
         }
@@ -240,7 +280,7 @@ fn visit_inlines_vec<V: AstVisitor + ?Sized>(inlines: &mut Vec<Inline>, visitor:
                 Inline::Emphasis { children, .. } | Inline::Strikethrough { children, .. } => {
                     visit_inlines_vec(children, visitor);
                 }
-                Inline::Link { text, .. } => {
+                Inline::Link { text, .. } | Inline::LinkReference { text, .. } => {
                     visit_inlines_vec(text, visitor);
                 }
                 // Text, Code, Image, HtmlInline, HardBreak, SoftBreak have no nested inlines
