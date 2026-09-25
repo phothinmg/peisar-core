@@ -21,4 +21,4 @@ fmt:
 doc:
 	cargo doc --open
 publish:
-	bash publish.sh
+	cargo publish --workspace
