@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Colored, formatted logging utilities for the Peisar project"
 readme = "README.md"
 
 [dependencies]

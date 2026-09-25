@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "A lossless Markdown AST parser with source-span tracking, GFM extensions, Kramdown block attributes, and a visitor-based transformation API"
 readme = "README.md"
 
 

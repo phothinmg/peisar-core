@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Parse optional YAML front matter from Markdown documents and deserialize it into any serde-enabled type"
 readme = "README.md"
 
 [dependencies]

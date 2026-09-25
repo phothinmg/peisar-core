@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+description = "Filesystem helper for performing common file operations relative to a configured root directory"
 readme = "README.md"
 
 [dependencies]
